@@ -27,7 +27,7 @@ import {
 } from "../../untils/warrantyDocumentStore.js";
 
 const API_URL =
-  "http://localhost:5000/api";
+  "https://your-backend-domain.com/api";
 
 const OVERRIDE_KEY =
   "warranty_vault_overrides";

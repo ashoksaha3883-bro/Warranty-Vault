@@ -96,7 +96,7 @@ function ConfirmWarranty({ file, onBack, onSave }) {
         data.append("warranty", file);
 
         const response = await fetch(
-          "http://localhost:5000/api/warranty/scan",
+         "https://warranty-vault-cdji.onrender.com/api/warranty/scan",
           {
             method: "POST",
             body: data,

@@ -12,7 +12,7 @@ const AuthContext =
   createContext(null);
 
 const API_URL =
-  "http://localhost:5000/api";
+   "https://warranty-vault-cdji.onrender.com/api";
 
 const TOKEN_KEY =
   "warranty_token";

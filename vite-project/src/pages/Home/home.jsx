@@ -8,7 +8,7 @@ import { useAuth } from "../../context/AuthContext.jsx";
 import { Bell, Camera, FileText, ScanLine, ShieldCheck, Sparkles, Upload, X, Plus, ChevronRight, AlertCircle, Clock3 } from "lucide-react";
 import { saveWarrantyDocument } from "../../untils/warrantyDocumentStore.js";
 
-const API_URL = "http://localhost:5000/api";
+const API_URL = "https://warranty-vault-cdji.onrender.com/api";
 const NOTIFICATION_STORAGE_KEY = "warranty_vault_notifications";
 
 function Home() {
