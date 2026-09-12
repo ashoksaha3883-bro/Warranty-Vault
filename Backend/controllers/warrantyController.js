@@ -3,6 +3,7 @@ require("dotenv").config();
 
 const axios = require("axios");
 const FormData = require("form-data");
+const sharp = require("sharp");
 
 const Warranty =
   require("../modal/Warrenty.js");
@@ -53,6 +54,51 @@ const scanWarranty = async (
     }
 
     // -----------------------------------------------
+    // COMPRESS IMAGE
+    // -----------------------------------------------
+
+    let processedFile;
+
+    try {
+      processedFile =
+        await compressImageForOCR(
+          req.file
+        );
+    } catch (compressionError) {
+      console.error(
+        "Image compression error:",
+        compressionError?.message ||
+          compressionError
+      );
+
+      return res.status(422).json({
+        success: false,
+        message:
+          "Unable to process the uploaded image.",
+      });
+    }
+
+    // -----------------------------------------------
+    // LOG FILE SIZE
+    // -----------------------------------------------
+
+    console.log(
+      `Original file: ${(
+        req.file.size /
+        1024 /
+        1024
+      ).toFixed(2)} MB`
+    );
+
+    console.log(
+      `OCR file: ${(
+        processedFile.buffer.length /
+        1024 /
+        1024
+      ).toFixed(2)} MB`
+    );
+
+    // -----------------------------------------------
     // CREATE OCR FORM
     // -----------------------------------------------
 
@@ -61,15 +107,13 @@ const scanWarranty = async (
 
     form.append(
       "file",
-      req.file.buffer,
+      processedFile.buffer,
       {
         filename:
-          req.file.originalname ||
-          "warranty-document",
+          processedFile.filename,
 
         contentType:
-          req.file.mimetype ||
-          "application/octet-stream",
+          processedFile.mimetype,
       }
     );
 
@@ -188,7 +232,10 @@ const scanWarranty = async (
         rawText
       );
 
-    // Small useful log only
+    // -----------------------------------------------
+    // LOG
+    // -----------------------------------------------
+
     console.log(
       `OCR completed: ${
         extracted.productName ||
@@ -219,6 +266,12 @@ const scanWarranty = async (
 
         mimeType:
           req.file.mimetype,
+
+        originalSize:
+          req.file.size,
+
+        processedSize:
+          processedFile.buffer.length,
       },
     });
   } catch (error) {
@@ -240,270 +293,6 @@ const scanWarranty = async (
     });
   }
 };
-
-/*
-==================================================
-CREATE WARRANTY
-==================================================
-*/
-
-const createWarranty = async (
-  req,
-  res
-) => {
-  try {
-    // -----------------------------------------------
-    // CHECK USER
-    // -----------------------------------------------
-
-    if (
-      !req.user ||
-      !req.user._id
-    ) {
-      return res.status(401).json({
-        success: false,
-        message:
-          "User is not authenticated",
-      });
-    }
-
-    // -----------------------------------------------
-    // GET WARRANTY DATA
-    // -----------------------------------------------
-
-    const {
-      productName,
-      brand,
-      model,
-      purchaseDate,
-      warrantyStartDate,
-      warrantyDuration,
-      warrantyEndDate,
-      invoiceNumber,
-      serialNumber,
-      serialNumbers,
-      seller,
-      contact,
-      placeOfSupply,
-      warrantyType,
-      category,
-      purchasePrice,
-      documentUrl,
-      productImageUrl,
-      products,
-    } = req.body;
-
-    // -----------------------------------------------
-    // VALIDATION
-    // -----------------------------------------------
-
-    if (!productName) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Product name is required",
-      });
-    }
-
-    if (!warrantyEndDate) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Warranty end date is required",
-      });
-    }
-
-    // -----------------------------------------------
-    // CREATE WARRANTY
-    // -----------------------------------------------
-
-    const warranty =
-      await Warranty.create({
-        user: req.user._id,
-
-        productName,
-
-        brand,
-
-        model,
-
-        purchaseDate,
-
-        warrantyStartDate,
-
-        warrantyDuration,
-
-        warrantyEndDate,
-
-        invoiceNumber,
-
-        serialNumber,
-
-        serialNumbers,
-
-        seller,
-
-        contact,
-
-        placeOfSupply,
-
-        warrantyType,
-
-        category,
-
-        purchasePrice,
-
-        documentUrl,
-
-        productImageUrl,
-
-        products,
-
-        status: "active",
-
-        remindersSent: [],
-      });
-
-    // -----------------------------------------------
-    // SMALL LOG
-    // -----------------------------------------------
-
-    console.log(
-      "Warranty saved:",
-      warranty._id.toString()
-    );
-
-    // -----------------------------------------------
-    // SEND IMMEDIATE WARRANTY SAVED EMAIL
-    // -----------------------------------------------
-    //
-    // This is a one-time confirmation email sent
-    // immediately after the warranty is saved.
-    //
-    // It respects the user's email notification
-    // preference from Profile.
-    //
-    // It is NOT added to remindersSent.
-    // Therefore it does not interfere with the
-    // existing expiry reminder system.
-    // -----------------------------------------------
-
-    if (
-      req.user.emailNotificationsEnabled ===
-      true
-    ) {
-      sendWarrantySavedConfirmationEmail({
-        user: req.user,
-        warranty,
-      })
-        .then(
-          (emailResult) => {
-            if (
-              !emailResult?.success
-            ) {
-              console.error(
-                "Warranty saved confirmation email failed:",
-                emailResult?.error ||
-                  "Unknown email error"
-              );
-            }
-          }
-        )
-        .catch(
-          (emailError) => {
-            console.error(
-              "Warranty saved confirmation email error:",
-              emailError?.message ||
-                emailError
-            );
-          }
-        );
-    }
-
-    // -----------------------------------------------
-    // RESPONSE
-    // -----------------------------------------------
-
-    return res.status(201).json({
-      success: true,
-
-      message:
-        "Warranty saved successfully",
-
-      warranty,
-    });
-  } catch (error) {
-    console.error(
-      "Create Warranty Error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Unable to save warranty",
-    });
-  }
-};
-
-/*
-==================================================
-GET MY WARRANTIES
-==================================================
-*/
-
-const getMyWarranties =
-  async (req, res) => {
-    try {
-      // -----------------------------------------------
-      // CHECK USER
-      // -----------------------------------------------
-
-      if (
-        !req.user ||
-        !req.user._id
-      ) {
-        return res.status(401).json({
-          success: false,
-          message:
-            "User is not authenticated",
-        });
-      }
-
-      // -----------------------------------------------
-      // FIND WARRANTIES
-      // -----------------------------------------------
-
-      const warranties =
-        await Warranty.find({
-          user: req.user._id,
-        })
-          .sort({
-            createdAt: -1,
-          })
-          .lean();
-
-      // -----------------------------------------------
-      // RESPONSE
-      // -----------------------------------------------
-
-      return res.status(200).json({
-        success: true,
-        warranties,
-      });
-    } catch (error) {
-      console.error(
-        "Get Warranties Error:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Unable to get warranties",
-      });
-    }
-  };
 
 /*
 ==================================================

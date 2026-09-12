@@ -192,6 +192,20 @@ process.on(
   }
 );
 
+
+app.use((err, req, res, next) => {
+  if (err) {
+    console.error("API Error:", err.message);
+
+    return res.status(400).json({
+      success: false,
+      message: err.message || "Something went wrong.",
+    });
+  }
+
+  next();
+});
+
 /* =========================================================
    START APPLICATION
 ========================================================= */

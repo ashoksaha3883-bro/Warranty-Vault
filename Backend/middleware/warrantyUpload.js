@@ -26,16 +26,9 @@ const upload = multer({
   storage,
 
   limits: {
-    // Maximum uploaded file size: 10 MB
-    fileSize: 10 * 1024 * 1024,
-
-    // Only one warranty document per scan request
+    fileSize: 50 * 1024 * 1024,
     files: 1,
-
-    // Prevent excessive multipart fields
     fields: 20,
-
-    // Prevent excessively large field values
     fieldSize: 100 * 1024,
   },
 
