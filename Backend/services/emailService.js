@@ -1,40 +1,32 @@
 // =========================================================
 // WARRANTY VAULT EMAIL SERVICE
 // =========================================================
-// Uses Resend HTTPS API instead of SMTP/Nodemailer.
+// Uses Brevo Transactional Email API.
 //
-// Render Free blocks outbound SMTP ports 25, 465 and 587,
-// so Gmail SMTP cannot be used from the free Render service.
+// Required Render environment variables:
+// BREVO_API_KEY
+// BREVO_FROM_EMAIL
 //
-// Required Render environment variable:
-// RESEND_API_KEY
-//
-// Optional Render environment variable:
-// RESEND_FROM_EMAIL
-//
-// For initial testing, Resend provides:
-// onboarding@resend.dev
+// Optional:
+// BREVO_FROM_NAME
 //
 // IMPORTANT:
-// The resend.dev test sender can only send testing emails
-// to the email address associated with your Resend account.
-// For sending to other users, verify your own domain in
-// Resend and then set RESEND_FROM_EMAIL to an address
-// on that verified domain.
+// BREVO_FROM_EMAIL must be a sender email that you have
+// registered and verified inside Brevo.
 // =========================================================
 
-const RESEND_API_URL =
-  "https://api.resend.com/emails";
+const BREVO_API_URL =
+  "https://api.brevo.com/v3/smtp/email";
 
-const RESEND_DOMAINS_URL =
-  "https://api.resend.com/domains";
-
-const getResendApiKey = () =>
-  process.env.RESEND_API_KEY || "";
+const getBrevoApiKey = () =>
+  process.env.BREVO_API_KEY || "";
 
 const getFromEmail = () =>
-  process.env.RESEND_FROM_EMAIL ||
-  "onboarding@resend.dev";
+  process.env.BREVO_FROM_EMAIL || "";
+
+const getFromName = () =>
+  process.env.BREVO_FROM_NAME ||
+  "Warranty Vault";
 
 // =========================================================
 // VERIFY EMAIL CONNECTION
@@ -43,11 +35,22 @@ const getFromEmail = () =>
 const verifyEmailConnection =
   async () => {
     const apiKey =
-      getResendApiKey();
+      getBrevoApiKey();
 
     if (!apiKey) {
       console.error(
-        "Email service configuration failed: RESEND_API_KEY is missing."
+        "Email service configuration failed: BREVO_API_KEY is missing."
+      );
+
+      return false;
+    }
+
+    const fromEmail =
+      getFromEmail();
+
+    if (!fromEmail) {
+      console.error(
+        "Email service configuration failed: BREVO_FROM_EMAIL is missing."
       );
 
       return false;
@@ -56,13 +59,16 @@ const verifyEmailConnection =
     try {
       const response =
         await fetch(
-          RESEND_DOMAINS_URL,
+          "https://api.brevo.com/v3/account",
           {
             method: "GET",
 
             headers: {
-              Authorization:
-                `Bearer ${apiKey}`,
+              accept:
+                "application/json",
+
+              "api-key":
+                apiKey,
             },
           }
         );
@@ -76,8 +82,9 @@ const verifyEmailConnection =
 
       if (!response.ok) {
         console.error(
-          "Email service connection failed:",
+          "Brevo email service connection failed:",
           result?.message ||
+            result?.code ||
             `HTTP ${response.status}`
         );
 
@@ -85,13 +92,17 @@ const verifyEmailConnection =
       }
 
       console.log(
-        "Email service connected successfully through Resend"
+        "Email service connected successfully through Brevo"
+      );
+
+      console.log(
+        `Brevo sender configured: ${fromEmail}`
       );
 
       return true;
     } catch (error) {
       console.error(
-        "Email service connection failed:",
+        "Brevo email service connection failed:",
         error?.message ||
           error
       );
@@ -109,17 +120,30 @@ const sendEmail =
     to,
     subject,
     html,
+    text = "",
   }) => {
     try {
       const apiKey =
-        getResendApiKey();
+        getBrevoApiKey();
 
       if (!apiKey) {
         return {
           success: false,
 
           error:
-            "RESEND_API_KEY is not configured on the backend.",
+            "BREVO_API_KEY is not configured on the backend.",
+        };
+      }
+
+      const fromEmail =
+        getFromEmail();
+
+      if (!fromEmail) {
+        return {
+          success: false,
+
+          error:
+            "BREVO_FROM_EMAIL is not configured on the backend.",
         };
       }
 
@@ -150,30 +174,54 @@ const sendEmail =
         };
       }
 
+      const body = {
+        sender: {
+          name:
+            getFromName(),
+
+          email:
+            fromEmail,
+        },
+
+        to: [
+          {
+            email:
+              String(to).trim(),
+          },
+        ],
+
+        subject,
+
+        htmlContent:
+          html,
+      };
+
+      if (text) {
+        body.textContent =
+          text;
+      }
+
       const response =
         await fetch(
-          RESEND_API_URL,
+          BREVO_API_URL,
           {
             method: "POST",
 
             headers: {
-              "Content-Type":
+              accept:
                 "application/json",
 
-              Authorization:
-                `Bearer ${apiKey}`,
+              "api-key":
+                apiKey,
+
+              "content-type":
+                "application/json",
             },
 
-            body: JSON.stringify({
-              from:
-                `Warranty Vault <${getFromEmail()}>`,
-
-              to: [to],
-
-              subject,
-
-              html,
-            }),
+            body:
+              JSON.stringify(
+                body
+              ),
           }
         );
 
@@ -187,12 +235,17 @@ const sendEmail =
       if (!response.ok) {
         const errorMessage =
           result?.message ||
-          result?.name ||
-          `Resend request failed with HTTP ${response.status}`;
+          result?.code ||
+          `Brevo request failed with HTTP ${response.status}`;
 
         console.error(
           "EMAIL ERROR:",
           errorMessage
+        );
+
+        console.error(
+          "Brevo response:",
+          result
         );
 
         return {
@@ -203,20 +256,24 @@ const sendEmail =
 
           status:
             response.status,
+
+          details:
+            result,
         };
       }
 
       console.log(
         "EMAIL SENT:",
-        result?.id ||
-          "Resend accepted the email"
+        result?.messageId ||
+          "Brevo accepted the email"
       );
 
       return {
         success: true,
 
         messageId:
-          result?.id || "",
+          result?.messageId ||
+          "",
       };
     } catch (error) {
       console.error(
@@ -271,7 +328,9 @@ const sendWarrantySavedConfirmationEmail =
             "en-IN",
             {
               day: "2-digit",
-              month: "long",
+              month:
+                "long",
+
               year: "numeric",
             }
           )
@@ -285,7 +344,9 @@ const sendWarrantySavedConfirmationEmail =
             "en-IN",
             {
               day: "2-digit",
-              month: "long",
+              month:
+                "long",
+
               year: "numeric",
             }
           )
@@ -547,7 +608,9 @@ const sendWarrantyReminder =
             "en-IN",
             {
               day: "2-digit",
-              month: "long",
+              month:
+                "long",
+
               year: "numeric",
             }
           )
@@ -676,12 +739,18 @@ const sendWarrantyReminder =
 
     const result =
       await sendEmail({
-        to: user?.email || "",
+        to:
+          user?.email ||
+          "",
+
         subject,
+
         html,
       });
 
-    if (!result.success) {
+    if (
+      !result.success
+    ) {
       throw new Error(
         result.error ||
           "Unable to send warranty reminder"
@@ -709,8 +778,11 @@ const sendLoginConfirmationEmail =
       new Date().toLocaleString(
         "en-IN",
         {
-          dateStyle: "full",
-          timeStyle: "short",
+          dateStyle:
+            "full",
+
+          timeStyle:
+            "short",
         }
       );
 
@@ -921,8 +993,11 @@ const sendLoginConfirmationEmail =
     `;
 
     return sendEmail({
-      to: userEmail,
+      to:
+        userEmail,
+
       subject,
+
       html,
     });
   };
@@ -931,8 +1006,6 @@ const sendLoginConfirmationEmail =
 // EXPORT
 // =========================================================
 
-// Kept for compatibility with existing imports.
-// The application no longer uses a Nodemailer transporter.
 const transporter = null;
 
 module.exports = {
