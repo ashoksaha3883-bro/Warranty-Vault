@@ -1,27 +1,40 @@
-const nodemailer = require("nodemailer");
-
 // =========================================================
-// CREATE TRANSPORTER
+// WARRANTY VAULT EMAIL SERVICE
+// =========================================================
+// Uses Resend HTTPS API instead of SMTP/Nodemailer.
+//
+// Render Free blocks outbound SMTP ports 25, 465 and 587,
+// so Gmail SMTP cannot be used from the free Render service.
+//
+// Required Render environment variable:
+// RESEND_API_KEY
+//
+// Optional Render environment variable:
+// RESEND_FROM_EMAIL
+//
+// For initial testing, Resend provides:
+// onboarding@resend.dev
+//
+// IMPORTANT:
+// The resend.dev test sender can only send testing emails
+// to the email address associated with your Resend account.
+// For sending to other users, verify your own domain in
+// Resend and then set RESEND_FROM_EMAIL to an address
+// on that verified domain.
 // =========================================================
 
-const transporter =
-  nodemailer.createTransport({
-    service: "gmail",
+const RESEND_API_URL =
+  "https://api.resend.com/emails";
 
-    pool: true,
+const RESEND_DOMAINS_URL =
+  "https://api.resend.com/domains";
 
-    maxConnections: 3,
+const getResendApiKey = () =>
+  process.env.RESEND_API_KEY || "";
 
-    maxMessages: 100,
-
-    auth: {
-      user:
-        process.env.EMAIL_USER,
-
-      pass:
-        process.env.EMAIL_PASSWORD,
-    },
-  });
+const getFromEmail = () =>
+  process.env.RESEND_FROM_EMAIL ||
+  "onboarding@resend.dev";
 
 // =========================================================
 // VERIFY EMAIL CONNECTION
@@ -29,18 +42,58 @@ const transporter =
 
 const verifyEmailConnection =
   async () => {
+    const apiKey =
+      getResendApiKey();
+
+    if (!apiKey) {
+      console.error(
+        "Email service configuration failed: RESEND_API_KEY is missing."
+      );
+
+      return false;
+    }
+
     try {
-      await transporter.verify();
+      const response =
+        await fetch(
+          RESEND_DOMAINS_URL,
+          {
+            method: "GET",
+
+            headers: {
+              Authorization:
+                `Bearer ${apiKey}`,
+            },
+          }
+        );
+
+      const result =
+        await response
+          .json()
+          .catch(
+            () => ({})
+          );
+
+      if (!response.ok) {
+        console.error(
+          "Email service connection failed:",
+          result?.message ||
+            `HTTP ${response.status}`
+        );
+
+        return false;
+      }
 
       console.log(
-        "Email service connected successfully"
+        "Email service connected successfully through Resend"
       );
 
       return true;
     } catch (error) {
       console.error(
         "Email service connection failed:",
-        error.message
+        error?.message ||
+          error
       );
 
       return false;
@@ -51,47 +104,136 @@ const verifyEmailConnection =
 // BASIC EMAIL
 // =========================================================
 
-const sendEmail = async ({
-  to,
-  subject,
-  html,
-}) => {
-  try {
-    const info =
-      await transporter.sendMail({
-        from:
-          `"Warranty Vault" <${process.env.EMAIL_USER}>`,
+const sendEmail =
+  async ({
+    to,
+    subject,
+    html,
+  }) => {
+    try {
+      const apiKey =
+        getResendApiKey();
 
-        to,
+      if (!apiKey) {
+        return {
+          success: false,
 
-        subject,
+          error:
+            "RESEND_API_KEY is not configured on the backend.",
+        };
+      }
 
-        html,
-      });
+      if (!to) {
+        return {
+          success: false,
 
-    console.log(
-      "EMAIL SENT:",
-      info.messageId
-    );
+          error:
+            "Recipient email address is missing.",
+        };
+      }
 
-    return {
-      success: true,
-      messageId:
-        info.messageId,
-    };
-  } catch (error) {
-    console.error(
-      "EMAIL ERROR:",
-      error.message
-    );
+      if (!subject) {
+        return {
+          success: false,
 
-    return {
-      success: false,
-      error:
-        error.message,
-    };
-  }
-};
+          error:
+            "Email subject is missing.",
+        };
+      }
+
+      if (!html) {
+        return {
+          success: false,
+
+          error:
+            "Email HTML content is missing.",
+        };
+      }
+
+      const response =
+        await fetch(
+          RESEND_API_URL,
+          {
+            method: "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+
+              Authorization:
+                `Bearer ${apiKey}`,
+            },
+
+            body: JSON.stringify({
+              from:
+                `Warranty Vault <${getFromEmail()}>`,
+
+              to: [to],
+
+              subject,
+
+              html,
+            }),
+          }
+        );
+
+      const result =
+        await response
+          .json()
+          .catch(
+            () => ({})
+          );
+
+      if (!response.ok) {
+        const errorMessage =
+          result?.message ||
+          result?.name ||
+          `Resend request failed with HTTP ${response.status}`;
+
+        console.error(
+          "EMAIL ERROR:",
+          errorMessage
+        );
+
+        return {
+          success: false,
+
+          error:
+            errorMessage,
+
+          status:
+            response.status,
+        };
+      }
+
+      console.log(
+        "EMAIL SENT:",
+        result?.id ||
+          "Resend accepted the email"
+      );
+
+      return {
+        success: true,
+
+        messageId:
+          result?.id || "",
+      };
+    } catch (error) {
+      console.error(
+        "EMAIL ERROR:",
+        error?.message ||
+          error
+      );
+
+      return {
+        success: false,
+
+        error:
+          error?.message ||
+          "Unable to send email.",
+      };
+    }
+  };
 
 // =========================================================
 // WARRANTY SAVED CONFIRMATION EMAIL
@@ -173,8 +315,6 @@ const sendWarrantySavedConfirmationEmail =
           overflow:hidden;
         ">
 
-          <!-- HEADER -->
-
           <div style="
             background:#0f172a;
             padding:30px;
@@ -214,8 +354,6 @@ const sendWarrantySavedConfirmationEmail =
 
           </div>
 
-          <!-- CONTENT -->
-
           <div style="
             padding:34px;
           ">
@@ -247,8 +385,6 @@ const sendWarrantySavedConfirmationEmail =
               We’ll keep the warranty information ready
               for your future reference and expiry reminders.
             </p>
-
-            <!-- PRODUCT CARD -->
 
             <div style="
               margin:24px 0;
@@ -316,8 +452,6 @@ const sendWarrantySavedConfirmationEmail =
 
             </div>
 
-            <!-- IMPORTANT MESSAGE -->
-
             <div style="
               margin-top:22px;
               padding:18px;
@@ -339,8 +473,6 @@ const sendWarrantySavedConfirmationEmail =
               </p>
 
             </div>
-
-            <!-- FOOTER -->
 
             <p style="
               margin-top:26px;
@@ -400,15 +532,15 @@ const sendWarrantyReminder =
     remainingText,
   }) => {
     const productName =
-      warranty.productName ||
+      warranty?.productName ||
       "Your product";
 
     const brand =
-      warranty.brand ||
+      warranty?.brand ||
       "Unknown brand";
 
     const warrantyEndDate =
-      warranty.warrantyEndDate
+      warranty?.warrantyEndDate
         ? new Date(
             warranty.warrantyEndDate
           ).toLocaleDateString(
@@ -471,7 +603,7 @@ const sendWarrantyReminder =
           </p>
 
           <p>
-            Hello ${user.name},
+            Hello ${user?.name || "there"},
           </p>
 
           <p style="
@@ -481,7 +613,8 @@ const sendWarrantyReminder =
             Your warranty for
             <strong>${productName}</strong>
             ${
-              remainingText === "expires today"
+              remainingText ===
+              "expires today"
                 ? "expires today."
                 : `has ${remainingText} remaining.`
             }
@@ -543,7 +676,7 @@ const sendWarrantyReminder =
 
     const result =
       await sendEmail({
-        to: user.email,
+        to: user?.email || "",
         subject,
         html,
       });
@@ -797,6 +930,10 @@ const sendLoginConfirmationEmail =
 // =========================================================
 // EXPORT
 // =========================================================
+
+// Kept for compatibility with existing imports.
+// The application no longer uses a Nodemailer transporter.
+const transporter = null;
 
 module.exports = {
   transporter,
